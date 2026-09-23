@@ -49,6 +49,32 @@ Generates a PDF from a published template.
 The response carries the generated file as a pre-signed URL valid for two hours. A failed
 asynchronous generation stops the node with the reason Doclift reported.
 
+### Doclift Trigger
+
+Starts a workflow when Doclift finishes a generation **that n8n did not ask for** — another
+system calls the API, and this node reacts. When n8n itself asks, the Doclift node's
+asynchronous mode already waits on its own callback and this trigger is not needed.
+
+Paste the node's production URL into the **webhook URL** of your Doclift external application,
+or send it as the `callback_url` of your own API calls. Doclift only accepts HTTPS addresses.
+
+- **Events** — `document_request.succeeded`, `document_request.failed`, or both.
+- **Options** — **Download PDF** attaches the file as binary.
+
+The credential must hold the key of the application whose callbacks arrive here: Doclift signs
+each body with that key, and a mismatch answers `401` and starts nothing. That is the first
+thing to check if a trigger stays silent.
+
+A failed generation is **emitted, not raised**: the node answers `200`, and the payload carries
+`event`, `error` and a flattened `failure_reason`. Branch on `event` to handle it. Raising
+would answer Doclift with a non-2xx, and it replays anything that is not a 2xx — up to the
+organization's replay count, with a backoff from 30 seconds to 30 minutes — so one failure
+would become several executions.
+
+For the same reason a callback can legitimately arrive **twice**: a delivery that timed out on
+the network is replayed even though n8n received it. Put a *Remove Duplicates* node on `id` if
+your workflow is not idempotent.
+
 ## Knowing what a template expects
 
 `GET /api/v1/templates/:id/payload_contract` describes a template in one shape whatever its
