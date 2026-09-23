@@ -32,14 +32,22 @@ Generates a PDF from a published template.
 
 - **Template** — picked from a searchable list. Only **workflows** and **fillable forms** are
   offered: they are the categories whose payload the API validates.
+- **Variables** — a form built from the template itself. Pick a template and the fields appear,
+  with a dropdown wherever the template constrains the values, and marked mandatory only where
+  the API will actually refuse a payload without them.
 - **Mode**
-  - **Synchronous** — waits and returns the document in the response. One document per call.
-  - **Asynchronous** — queues the generation and answers immediately. A callback URL is required.
-- **Variables** — a JSON object keyed by variable name.
-- **Options** — a **Tag** of your own (echoed back, and searchable), and a **Callback URL** that
-  overrides the one configured on the external application.
+  - **Synchronous** — waits on the open connection and returns the document. One per call.
+  - **Asynchronous** — queues the generation. With **Wait for Completion** on (the default) the
+    execution **pauses until Doclift calls back**: nothing to wire, the node hands Doclift its
+    own resume URL and verifies the HMAC signature of the callback before continuing. One item
+    per execution — put the node behind a Loop Over Items for a batch. Turn the toggle off to
+    queue and continue, with the callback going wherever you point it.
+- **Options** — **Collections (JSON)** for tabular variables, which the flat form cannot hold;
+  **Download PDF** to attach the file as binary rather than returning only its URL; a **Tag** of
+  your own, echoed back and searchable; and a **Timeout** for the asynchronous wait.
 
-The response carries the generated file as a pre-signed URL valid for two hours.
+The response carries the generated file as a pre-signed URL valid for two hours. A failed
+asynchronous generation stops the node with the reason Doclift reported.
 
 ## Knowing what a template expects
 
