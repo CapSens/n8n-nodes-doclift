@@ -35,53 +35,26 @@ Generates a PDF from a published template.
 - **Variables** — a form built from the template itself. Pick a template and the fields appear,
   with a dropdown wherever the template constrains the values, and marked mandatory only where
   the API will actually refuse a payload without them.
-- **Mode**
-  - **Synchronous** — waits on the open connection and returns the document. One per call.
-  - **Asynchronous** — queues the generation. With **Wait for Completion** on (the default) the
-    execution **pauses until Doclift calls back**: nothing to wire, the node hands Doclift its
-    own resume URL and verifies the HMAC signature of the callback before continuing. One item
-    per execution — put the node behind a Loop Over Items for a batch. Turn the toggle off to
-    queue and continue, with the callback going wherever you point it.
 - **Options** — **Collections (JSON)** for tabular variables, which the flat form cannot hold;
   **Download PDF** to attach the file as binary rather than returning only its URL; a **Tag** of
-  your own, echoed back and searchable; and a **Timeout** for the asynchronous wait.
+  your own, echoed back and searchable; and **Max Attempts When Busy** (see below).
 
-The response carries the generated file as a pre-signed URL valid for two hours. A failed
-asynchronous generation stops the node with the reason Doclift reported.
+The node waits on the open connection and returns the document. The response carries the
+generated file as a pre-signed URL valid for two hours, and one call generates one document.
 
-> **Waiting for completion needs your n8n to be reachable over HTTPS.** The node hands Doclift
-> its own resume URL, and Doclift only accepts HTTPS callbacks outside its own development mode.
-> An n8n served over plain `http` — a self-hosted instance without TLS, or one reached by its
-> local address — gets `422 invalid_callback_url` back, with nothing wrong on either side. n8n
-> Cloud satisfies this already; self-hosted, put a reverse proxy or a tunnel in front and set
-> `WEBHOOK_URL` so n8n advertises the public address. Turning **Wait for Completion** off avoids
-> the constraint entirely, since the callback then goes wherever you point it.
+### When Doclift is busy
 
-### Doclift Trigger
+An organization holds a fixed number of synchronous slots — **five** by default — and Doclift
+answers `429` with a `Retry-After` once they are all taken. Slots free as generations finish, so
+saturation is usually a matter of seconds.
 
-Starts a workflow when Doclift finishes a generation **that n8n did not ask for** — another
-system calls the API, and this node reacts. When n8n itself asks, the Doclift node's
-asynchronous mode already waits on its own callback and this trigger is not needed.
+The node honours that header and re-sends, up to **Max Attempts When Busy** (5 by default). Only
+a 429 is retried; every other failure is raised on the first try. If the slots are still full
+after the last attempt, the node stops with a message naming the three ways out: raise the
+option, spread the work, or have the organization's synchronous limit raised — it is a per-organization setting on the Doclift side.
 
-Paste the node's production URL into the **webhook URL** of your Doclift external application,
-or send it as the `callback_url` of your own API calls. Doclift only accepts HTTPS addresses.
-
-- **Events** — `document_request.succeeded`, `document_request.failed`, or both.
-- **Options** — **Download PDF** attaches the file as binary.
-
-The credential must hold the key of the application whose callbacks arrive here: Doclift signs
-each body with that key, and a mismatch answers `401` and starts nothing. That is the first
-thing to check if a trigger stays silent.
-
-A failed generation is **emitted, not raised**: the node answers `200`, and the payload carries
-`event`, `error` and a flattened `failure_reason`. Branch on `event` to handle it. Raising
-would answer Doclift with a non-2xx, and it replays anything that is not a 2xx — up to the
-organization's replay count, with a backoff from 30 seconds to 30 minutes — so one failure
-would become several executions.
-
-For the same reason a callback can legitimately arrive **twice**: a delivery that timed out on
-the network is replayed even though n8n received it. Put a *Remove Duplicates* node on `id` if
-your workflow is not idempotent.
+Generating a batch is therefore a loop of single calls rather than one call carrying many, and
+the retry is what keeps that loop from failing on a transient burst.
 
 ## Knowing what a template expects
 
