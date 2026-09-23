@@ -37,9 +37,11 @@ Generates a PDF from a published template.
   the API will actually refuse a payload without them.
 - **Mode**
   - **Synchronous** — waits on the open connection and returns the document. One per call.
-  - **Asynchronous** — queues the generation and **pauses the execution until Doclift calls
-    back**. There is nothing to wire: the node hands Doclift its own resume URL, and verifies
-    the HMAC signature of the callback before continuing.
+  - **Asynchronous** — queues the generation. With **Wait for Completion** on (the default) the
+    execution **pauses until Doclift calls back**: nothing to wire, the node hands Doclift its
+    own resume URL and verifies the HMAC signature of the callback before continuing. One item
+    per execution — put the node behind a Loop Over Items for a batch. Turn the toggle off to
+    queue and continue, with the callback going wherever you point it.
 - **Options** — **Collections (JSON)** for tabular variables, which the flat form cannot hold;
   **Download PDF** to attach the file as binary rather than returning only its URL; a **Tag** of
   your own, echoed back and searchable; and a **Timeout** for the asynchronous wait.

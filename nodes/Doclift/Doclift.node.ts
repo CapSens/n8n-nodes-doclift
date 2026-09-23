@@ -1,6 +1,8 @@
 import {
+	NodeApiError,
 	NodeConnectionTypes,
 	NodeOperationError,
+	type JsonObject,
 	type IDataObject,
 	type IExecuteFunctions,
 	type Icon,
@@ -12,11 +14,13 @@ import {
 } from 'n8n-workflow';
 
 import { searchTemplates } from './methods/listSearch';
+import { attachPdf, docliftRequest } from './shared/request';
 import { getTemplateFields } from './methods/resourceMapping';
 import { signatureMatches } from './shared/signature';
 
-interface SentRequest {
+interface PendingWait {
 	documentRequestId?: number;
+	deadline?: number;
 }
 
 // `webhookMethods` has nothing to do here, which is why the lifecycle rule is
@@ -115,6 +119,15 @@ export class Doclift implements INodeType {
 				],
 			},
 			{
+				displayName: 'Wait for Completion',
+				name: 'waitForCompletion',
+				type: 'boolean',
+				default: true,
+				displayOptions: { show: { resource: ['document'], operation: ['generate'], mode: ['asynchrone'] } },
+				description:
+					'Whether to pause the execution until Doclift calls back, handing it this node\'s own resume URL. Turn off to queue and continue, in which case the callback goes to the Callback URL option or to the address configured on the external application.',
+			},
+			{
 				displayName: 'Variables',
 				name: 'variables',
 				type: 'resourceMapper',
@@ -140,38 +153,42 @@ export class Doclift implements INodeType {
 				placeholder: 'Add option',
 				default: {},
 				displayOptions: { show: { resource: ['document'], operation: ['generate'] } },
-				options: [
-					{
+				options: [					{
+						displayName: 'Callback URL',
+						name: 'callbackUrl',
+						type: 'string',
+						default: '',
+						description:
+							'Where Doclift delivers the webhook when this node does not wait for it. Must be HTTPS. Left empty, the address configured on the external application is used.',
+						displayOptions: { show: { '/mode': ['asynchrone'], '/waitForCompletion': [false] } },
+					},					{
 						displayName: 'Collections (JSON)',
 						name: 'collections',
 						type: 'json',
 						default: '{}',
 						description:
 							'Collection variables, which the mapping form above cannot hold because it is flat. A JSON object keyed by variable name, each an array of row objects.',
-					},
-					{
+					},					{
 						displayName: 'Download PDF',
 						name: 'download',
 						type: 'boolean',
 						default: false,
 						description:
 							'Whether to fetch the generated file and attach it as binary data, rather than only returning its URL',
-					},
-					{
+					},					{
 						displayName: 'Tag',
 						name: 'tag',
 						type: 'string',
 						default: '',
 						description: 'Your own reference, echoed back and searchable on the request list',
-					},
-					{
+					},					{
 						displayName: 'Timeout (Minutes)',
 						name: 'timeoutMinutes',
 						type: 'number',
 						default: 5,
 						description:
 							'How long an asynchronous generation may keep the execution waiting before it fails',
-						displayOptions: { show: { '/mode': ['asynchrone'] } },
+						displayOptions: { show: { '/mode': ['asynchrone'], '/waitForCompletion': [true] } },
 					},
 				],
 			},
@@ -184,67 +201,85 @@ export class Doclift implements INodeType {
 	};
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
-		const context = this.getContext('node') as SentRequest;
+		const pending = this.getContext('node') as PendingWait;
 
-		// A second pass without the webhook having fired is the deadline going
-		// off: the request exists, Doclift never called back.
-		if (context.documentRequestId !== undefined) {
-			throw new NodeOperationError(
-				this.getNode(),
-				`Doclift did not call back within the timeout. Document request ${context.documentRequestId} may still be running.`,
-			);
+		// Re-entering with a wait recorded is either the deadline going off, or
+		// the node running a second time inside a loop. The deadline tells them
+		// apart: past it, Doclift never called back; before it, this is a fresh
+		// iteration and the previous one already resumed through `webhook`.
+		if (pending.deadline !== undefined) {
+			const timedOut = Date.now() >= pending.deadline;
+			const requestId = pending.documentRequestId;
+			delete pending.deadline;
+			delete pending.documentRequestId;
+
+			if (timedOut) {
+				throw new NodeOperationError(
+					this.getNode(),
+					`Doclift did not call back within the timeout. Document request ${requestId} may still be running.`,
+				);
+			}
 		}
 
-		const credentials = await this.getCredentials('docliftApi');
-		const returnData: INodeExecutionData[] = [];
 		const items = this.getInputData();
+		const returnData: INodeExecutionData[] = [];
 
 		for (let i = 0; i < items.length; i++) {
-			const mode = this.getNodeParameter('mode', i) as string;
-			const templateId = this.getNodeParameter('templateId', i, undefined, {
-				extractValue: true,
-			}) as string;
-			const options = this.getNodeParameter('options', i, {}) as IDataObject;
-			const mapped = this.getNodeParameter('variables.value', i, {}) as IDataObject;
+			try {
+				const mode = this.getNodeParameter('mode', i) as string;
+				const waits =
+					mode === 'asynchrone' && (this.getNodeParameter('waitForCompletion', i, true) as boolean);
+				const options = this.getNodeParameter('options', i, {}) as IDataObject;
 
-			const body: IDataObject = {
-				document_request: {
-					type: mode,
-					tag: (options.tag as string) ?? '',
-					document_generations: [
-						{
-							template_id: Number(templateId),
-							variables: { ...mapped, ...parseCollections.call(this, options.collections, i) },
-						},
-					],
-				},
-			};
+				// An execution can only be suspended once, so a batch cannot each
+				// have its own callback. Refused rather than silently generating the
+				// first and dropping the rest.
+				if (waits && items.length > 1) {
+					throw new NodeOperationError(
+						this.getNode(),
+						`Waiting for completion handles one item per execution, and this node received ${items.length}. Turn off "Wait for Completion", or put the node behind a Loop Over Items.`,
+					);
+				}
 
-			if (mode === 'asynchrone') {
-				const resumeUrl = this.evaluateExpression('{{ $execution.resumeUrl }}', i) as string;
-				(body.document_request as IDataObject).callback_url = resumeUrl;
+				const response = await docliftRequest<IDataObject>(this, {
+					method: 'POST',
+					url: '/api/v1/document_requests',
+					body: buildBody.call(this, i, mode, options, waits),
+				});
+
+				if (waits) {
+					const minutes = (options.timeoutMinutes as number) ?? 5;
+					const deadline = Date.now() + minutes * 60 * 1000;
+
+					pending.documentRequestId = response.id as number;
+					pending.deadline = deadline;
+
+					await this.putExecutionToWait(new Date(deadline));
+
+					return [returnData];
+				}
+
+				const item: INodeExecutionData = { json: response, pairedItem: { item: i } };
+
+				if (options.download === true) {
+					const binary = await attachPdf(this, response);
+					if (binary !== undefined) item.binary = binary;
+				}
+
+				returnData.push(item);
+			} catch (error) {
+				if (this.continueOnFail()) {
+					returnData.push({ json: { error: (error as Error).message }, pairedItem: { item: i } });
+					continue;
+				}
+
+				const failure =
+					error instanceof NodeOperationError
+						? error
+						: new NodeApiError(this.getNode(), error as JsonObject);
+
+				throw failure;
 			}
-
-			const response = (await this.helpers.httpRequestWithAuthentication.call(this, 'docliftApi', {
-				method: 'POST',
-				baseURL: credentials.baseUrl as string,
-				url: '/api/v1/document_requests',
-				body,
-				json: true,
-			})) as IDataObject;
-
-			if (mode === 'asynchrone') {
-				// One request per execution: the pause belongs to the execution, not
-				// to the item, so a second item would overwrite the first's wait.
-				context.documentRequestId = response.id as number;
-
-				const minutes = (options.timeoutMinutes as number) ?? 5;
-				await this.putExecutionToWait(new Date(Date.now() + minutes * 60 * 1000));
-
-				return [returnData];
-			}
-
-			returnData.push(...(await toOutput.call(this, response, i, options)));
 		}
 
 		return [returnData];
@@ -261,7 +296,9 @@ export class Doclift implements INodeType {
 		await request.readRawBody();
 		const raw = request.rawBody?.toString('utf8') ?? '';
 
-		if (!signatureMatches(raw, this.getHeaderData()['x-doclift-signature'], credentials.apiKey as string)) {
+		if (
+			!signatureMatches(raw, this.getHeaderData()['x-doclift-signature'], credentials.apiKey as string)
+		) {
 			throw new NodeOperationError(
 				this.getNode(),
 				'The callback signature does not match this credential. It was not sent by Doclift, or it was sent for another application.',
@@ -274,40 +311,52 @@ export class Doclift implements INodeType {
 			throw new NodeOperationError(this.getNode(), failureReason(payload));
 		}
 
-		return { workflowData: [[{ json: payload }]] };
+		const item: INodeExecutionData = { json: payload };
+		const options = this.getNodeParameter('options', {}) as IDataObject;
+
+		// The option promises the same thing in both modes, so it has to be kept
+		// on the path that produces the output of an asynchronous run.
+		if (options.download === true) {
+			const binary = await attachPdf(this, payload);
+			if (binary !== undefined) item.binary = binary;
+		}
+
+		return { workflowData: [[item]] };
 	}
 }
 
-async function toOutput(
+function buildBody(
 	this: IExecuteFunctions,
-	response: IDataObject,
 	itemIndex: number,
+	mode: string,
 	options: IDataObject,
-): Promise<INodeExecutionData[]> {
-	const item: INodeExecutionData = { json: response, pairedItem: { item: itemIndex } };
-	if (options.download !== true) return [item];
+	waits: boolean,
+): IDataObject {
+	const templateId = this.getNodeParameter('templateId', itemIndex, undefined, {
+		extractValue: true,
+	}) as string;
+	const mapped = this.getNodeParameter('variables.value', itemIndex, {}) as IDataObject;
 
-	const generation = ((response.documents_generations as IDataObject[]) ?? [])[0];
-	const file = generation?.file as IDataObject | undefined;
-	if (typeof file?.url !== 'string') return [item];
-
-	const downloaded = (await this.helpers.httpRequest({
-		method: 'GET',
-		url: file.url,
-		encoding: 'arraybuffer',
-		json: false,
-	})) as ArrayBuffer;
-
-	item.binary = {
-		data: await this.helpers.prepareBinaryData(
-			Buffer.from(downloaded),
-			(file.filename as string) ?? 'document.pdf',
-			'application/pdf',
-		),
+	const request: IDataObject = {
+		type: mode,
+		tag: (options.tag as string) ?? '',
+		document_generations: [
+			{
+				template_id: Number(templateId),
+				variables: { ...mapped, ...parseCollections.call(this, options.collections, itemIndex) },
+			},
+		],
 	};
 
-	return [item];
+	if (waits) {
+		request.callback_url = this.evaluateExpression('{{ $execution.resumeUrl }}', itemIndex);
+	} else if (mode === 'asynchrone' && options.callbackUrl) {
+		request.callback_url = options.callbackUrl;
+	}
+
+	return { document_request: request };
 }
+
 
 function failureReason(payload: IDataObject): string {
 	const generations = (payload.documents_generations as IDataObject[]) ?? [];

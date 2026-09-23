@@ -1,6 +1,7 @@
 import type { ILoadOptionsFunctions, ResourceMapperFields } from 'n8n-workflow';
 
 import { fieldsFromContract, type PayloadContract } from '../shared/contract';
+import { docliftRequest } from '../shared/request';
 
 export async function getTemplateFields(
 	this: ILoadOptionsFunctions,
@@ -13,14 +14,10 @@ export async function getTemplateFields(
 		return { fields: [], emptyFieldsNotice: 'Choose a template first.' };
 	}
 
-	const credentials = await this.getCredentials('docliftApi');
-
-	const contract = (await this.helpers.httpRequestWithAuthentication.call(this, 'docliftApi', {
+	const contract = await docliftRequest<PayloadContract>(this, {
 		method: 'GET',
-		baseURL: credentials.baseUrl as string,
 		url: `/api/v1/templates/${templateId}/payload_contract`,
-		json: true,
-	})) as PayloadContract;
+	});
 
 	const fields = fieldsFromContract(contract);
 

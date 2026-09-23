@@ -49,12 +49,3 @@ export function fieldsFromContract(contract: PayloadContract): ResourceMapperFie
 			};
 		});
 }
-
-/**
- * Collections are left out of the mapping form: it is flat, and a collection
- * takes an array of row objects. They travel in a JSON field of their own,
- * which is only worth showing when the template declares one.
- */
-export function collectionNames(contract: PayloadContract): string[] {
-	return contract.collections ?? [];
-}
