@@ -28,6 +28,7 @@
     "release": "n8n-node release",
     "prepublishOnly": "n8n-node prerelease",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:watch": "vitest"
   },
   "files": [
@@ -48,6 +49,7 @@
   },
   "devDependencies": {
     "@n8n/node-cli": "*",
+    "@vitest/coverage-v8": "^5.0.1",
     "eslint": "9.32.0",
     "prettier": "3.6.2",
     "release-it": "^19.0.4",
