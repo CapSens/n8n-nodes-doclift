@@ -17,11 +17,7 @@ import { searchTemplates } from './methods/listSearch';
 import { attachPdf, docliftRequest } from './shared/request';
 import { getTemplateFields } from './methods/resourceMapping';
 import { signatureMatches } from './shared/signature';
-
-interface PendingWait {
-	documentRequestId?: number;
-	deadline?: number;
-}
+import { classifyReentry, type PendingWait } from './shared/wait';
 
 // `webhookMethods` has nothing to do here, which is why the lifecycle rule is
 // off for this class: the webhook below is a resume hook, the shape n8n's own
@@ -207,23 +203,13 @@ export class Doclift implements INodeType {
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const pending = this.getContext('node') as PendingWait;
+		const reentry = classifyReentry(pending, Date.now());
 
-		// Re-entering with a wait recorded is either the deadline going off, or
-		// the node running a second time inside a loop. The deadline tells them
-		// apart: past it, Doclift never called back; before it, this is a fresh
-		// iteration and the previous one already resumed through `webhook`.
-		if (pending.deadline !== undefined) {
-			const timedOut = Date.now() >= pending.deadline;
-			const requestId = pending.documentRequestId;
-			delete pending.deadline;
-			delete pending.documentRequestId;
-
-			if (timedOut) {
-				throw new NodeOperationError(
-					this.getNode(),
-					`Doclift did not call back within the timeout. Document request ${requestId} may still be running.`,
-				);
-			}
+		if (reentry.kind === 'timedOut') {
+			throw new NodeOperationError(
+				this.getNode(),
+				`Doclift did not call back within the timeout. Document request ${reentry.documentRequestId} may still be running.`,
+			);
 		}
 
 		const items = this.getInputData();
