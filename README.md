@@ -49,6 +49,14 @@ Generates a PDF from a published template.
 The response carries the generated file as a pre-signed URL valid for two hours. A failed
 asynchronous generation stops the node with the reason Doclift reported.
 
+> **Waiting for completion needs your n8n to be reachable over HTTPS.** The node hands Doclift
+> its own resume URL, and Doclift only accepts HTTPS callbacks outside its own development mode.
+> An n8n served over plain `http` — a self-hosted instance without TLS, or one reached by its
+> local address — gets `422 invalid_callback_url` back, with nothing wrong on either side. n8n
+> Cloud satisfies this already; self-hosted, put a reverse proxy or a tunnel in front and set
+> `WEBHOOK_URL` so n8n advertises the public address. Turning **Wait for Completion** off avoids
+> the constraint entirely, since the callback then goes wherever you point it.
+
 ### Doclift Trigger
 
 Starts a workflow when Doclift finishes a generation **that n8n did not ask for** — another
