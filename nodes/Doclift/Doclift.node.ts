@@ -51,7 +51,12 @@ export class Doclift implements INodeType {
 				name: 'default',
 				httpMethod: 'POST',
 				responseMode: 'onReceived',
-				path: '={{$nodeId}}',
+				// Empty, as n8n's own Wait node leaves it. The path is a suffix of
+				// the resume url, and `$execution.resumeUrl` — the address handed to
+				// Doclift — carries none: anything here registers the webhook
+				// somewhere the callback will never knock, and the reply is a 404
+				// nothing in the workflow surfaces.
+				path: '',
 				restartWebhook: true,
 			},
 		],
