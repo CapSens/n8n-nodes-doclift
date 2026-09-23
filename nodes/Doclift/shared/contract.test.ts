@@ -93,6 +93,22 @@ describe('fieldsFromContract', () => {
 		expect(fields.map((field) => field.id)).toEqual(['total']);
 	});
 
+	// n8n asks for the fields as soon as the node opens, and an older Doclift —
+	// or a template whose contract predates a key — answers without one of them.
+	it('survives a contract missing the keys it reads', () => {
+		const partial = { template_id: 1, category: 'workflow' } as unknown as PayloadContract;
+
+		expect(fieldsFromContract(partial)).toEqual([]);
+	});
+
+	it('treats a variable with no list as free text', () => {
+		const fields = fieldsFromContract(
+			contract({ variables: [{ name: 'comment' }] }),
+		);
+
+		expect(fields[0].type).toBe('string');
+	});
+
 	it('survives a contract with no variable at all', () => {
 		expect(fieldsFromContract(contract())).toEqual([]);
 	});
