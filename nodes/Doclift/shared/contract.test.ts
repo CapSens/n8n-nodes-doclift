@@ -18,6 +18,7 @@ describe('fieldsFromContract', () => {
 	it('turns a constrained variable into a dropdown of its allowed values', () => {
 		const fields = fieldsFromContract(
 			contract({
+				required: ['country'],
 				variables: [{ name: 'country', allowed_values: ['fr', 'be'], field_type: 'select' }],
 			}),
 		);
@@ -28,6 +29,21 @@ describe('fieldsFromContract', () => {
 				type: 'options',
 				options: ['fr', 'be'].map((value) => ({ name: value, value })),
 			}),
+		]);
+	});
+
+	// The wall hit on the first real mapping: an optional constrained variable
+	// could not be left empty, because a dropdown refuses a value that is not on
+	// its list. The API accepts blank; the form now offers it.
+	it('opens an optional constrained variable with a way out of the list', () => {
+		const fields = fieldsFromContract(
+			contract({ variables: [{ name: 'legal_form', allowed_values: ['SAS', 'SARL'] }] }),
+		);
+
+		expect(fields[0].options).toEqual([
+			{ name: 'None', value: '' },
+			{ name: 'SAS', value: 'SAS' },
+			{ name: 'SARL', value: 'SARL' },
 		]);
 	});
 

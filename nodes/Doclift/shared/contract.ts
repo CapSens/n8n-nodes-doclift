@@ -21,6 +21,14 @@ export interface PayloadContract {
 const COLLECTION = 'collection';
 
 /**
+ * A dropdown refuses a value absent from its list, and an empty one is on no
+ * list: without this choice, an optional constrained variable can only be left
+ * out by removing its field from the form. The API takes a blank value on a
+ * constrained variable like on any other.
+ */
+const NOT_SET = { name: 'None', value: '' };
+
+/**
  * Turns a template's contract into the fields of the mapping form.
  *
  * `required` is read off the contract's own list rather than off each
@@ -28,6 +36,7 @@ const COLLECTION = 'collection';
  * fillable form stores the flag and enforces nothing, so marking its fields
  * mandatory would promise a 422 that never comes.
  */
+
 export function fieldsFromContract(contract: PayloadContract): ResourceMapperField[] {
 	const required = new Set(contract.required ?? []);
 
@@ -36,16 +45,18 @@ export function fieldsFromContract(contract: PayloadContract): ResourceMapperFie
 		.map((variable) => {
 			const allowed = variable.allowed_values ?? [];
 			const constrained = allowed.length > 0;
+			const mandatory = required.has(variable.name);
+			const choices = allowed.map((value) => ({ name: value, value }));
 
 			return {
 				id: variable.name,
 				displayName: variable.name,
-				required: required.has(variable.name),
+				required: mandatory,
 				defaultMatch: false,
 				canBeUsedToMatch: false,
 				display: true,
 				type: (constrained ? 'options' : 'string') as FieldType,
-				...(constrained ? { options: allowed.map((value) => ({ name: value, value })) } : {}),
+				...(constrained ? { options: mandatory ? choices : [NOT_SET, ...choices] } : {}),
 			};
 		});
 }

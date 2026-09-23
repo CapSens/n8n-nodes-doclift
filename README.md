@@ -34,7 +34,8 @@ Generates a PDF from a published template.
   offered: they are the categories whose payload the API validates.
 - **Variables** — a form built from the template itself. Pick a template and the fields appear,
   with a dropdown wherever the template constrains the values, and marked mandatory only where
-  the API will actually refuse a payload without them.
+  the API will actually refuse a payload without them. An optional dropdown opens on **None**,
+  which sends an empty value.
 - **Options** — **Collections (JSON)** for tabular variables, which the flat form cannot hold;
   **Download PDF** to attach the file as binary rather than returning only its URL; a **Tag** of
   your own, echoed back and searchable; and **Max Attempts When Busy** (see below).
