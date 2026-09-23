@@ -32,3 +32,8 @@ jobs:
 
       - name: Run build
         run: 'npm run build'
+
+      # Thresholds live in vitest.config.ts: the suite fails below 100% of
+      # statements, branches, functions and lines.
+      - name: Run tests
+        run: 'npm run test:coverage'
