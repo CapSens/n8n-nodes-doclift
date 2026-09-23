@@ -43,8 +43,7 @@
       "dist/credentials/DocliftApi.credentials.js"
     ],
     "nodes": [
-      "dist/nodes/Doclift/Doclift.node.js",
-      "dist/nodes/DocliftTrigger/DocliftTrigger.node.js"
+      "dist/nodes/Doclift/Doclift.node.js"
     ]
   },
   "devDependencies": {

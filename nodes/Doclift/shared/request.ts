@@ -3,10 +3,9 @@ import type {
 	IExecuteFunctions,
 	IHttpRequestMethods,
 	ILoadOptionsFunctions,
-	IWebhookFunctions,
 } from 'n8n-workflow';
 
-export type DocliftCaller = IExecuteFunctions | ILoadOptionsFunctions | IWebhookFunctions;
+export type DocliftCaller = IExecuteFunctions | ILoadOptionsFunctions;
 
 const CREDENTIALS = 'docliftApi';
 
@@ -26,7 +25,7 @@ export async function docliftRequest<T>(
 
 /** The generated file, fetched from its pre-signed url and attached as binary. */
 export async function attachPdf(
-	caller: IExecuteFunctions | IWebhookFunctions,
+	caller: IExecuteFunctions,
 	response: IDataObject,
 ): Promise<{ data: Awaited<ReturnType<typeof caller.helpers.prepareBinaryData>> } | undefined> {
 	const generation = ((response.documents_generations as IDataObject[]) ?? [])[0];
